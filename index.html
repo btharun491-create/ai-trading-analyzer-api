@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Trading Analyzer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f4f6f8; color: #333; padding: 20px; }
+    header { text-align: center; margin-bottom: 20px; }
+    h1 { color: #111; margin-bottom: 8px; }
+    .status { text-align: center; margin-bottom: 20px; font-weight: 500; color: #666; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; max-width: 1200px; margin: 0 auto; }
+    .card { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); display: flex; flex-direction: column; gap: 8px; }
+    .card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 4px; }
+    .stock-title { font-size: 1.2rem; font-weight: bold; }
+    .signal { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; }
+    .signal-buy { background: #e6f4ea; color: #137333; }
+    .signal-sell { background: #fce8e6; color: #c5221f; }
+    .signal-hold { background: #feefc3; color: #b06000; }
+    .row { display: flex; justify-content: space-between; font-size: 0.95rem; }
+    .label { font-weight: 600; color: #555; }
+    .news { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ddd; font-size: 0.85rem; color: #444; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Trading Analyzer</h1>
+  </header>
+  <div id="status" class="status">Loading stock data...</div>
+  <div id="cards" class="grid"></div>
+
+  <script>
+    async function loadData() {
+      const statusEl = document.getElementById('status');
+      const cardsEl = document.getElementById('cards');
+      try {
+        const res = await fetch('https://ai-trading-analyzer-api.onrender.com/api/scan');
+        if (!res.ok) throw new Error('HTTP error ' + res.status);
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.stocks || data.results || [data]);
+        
+        statusEl.textContent = 'Last scanned: ' + new Date().toLocaleTimeString();
+        cardsEl.innerHTML = '';
+        
+        items.forEach(item => {
+          const sig = (item.Signal || item.signal || '').toLowerCase();
+          const sigClass = sig.includes('buy') ? 'signal-buy' : sig.includes('sell') ? 'signal-sell' : 'signal-hold';
+          
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = `
+            <div class="card-header">
+              <span class="stock-title">${item.Stock || item.stock || 'N/A'}</span>
+              <span class="signal ${sigClass}">${item.Signal || item.signal || 'N/A'}</span>
+            </div>
+            <div class="row"><span class="label">Company:</span> <span>${item.Company || item.company || 'N/A'}</span></div>
+            <div class="row"><span class="label">Price:</span> <span>${item.Price || item.price || 'N/A'}</span></div>
+            <div class="row"><span class="label">Target:</span> <span>${item.Target || item.target || 'N/A'}</span></div>
+            <div class="row"><span class="label">Stop Loss:</span> <span>${item.Stop_Loss || item.stop_loss || 'N/A'}</span></div>
+            <div class="row"><span class="label">Probability Up:</span> <span>${item.Probability_Up || item.probability_up || 'N/A'}</span></div>
+            <div class="news"><span class="label">News:</span> ${item.News || item.news || 'N/A'}</div>
+          `;
+          cardsEl.appendChild(card);
+        });
+      } catch (err) {
+        statusEl.textContent = 'Error loading scan data: ' + err.message;
+      }
+    }
+    loadData();
+  </script>
+</body>
+</html>
