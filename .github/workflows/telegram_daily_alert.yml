@@ -1,0 +1,54 @@
+name: Telegram Daily Alert
+
+on:
+  schedule:
+    - cron: "30 3 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  telegram-alert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install requests
+        run: pip install requests
+
+      - name: Fetch signals and send Telegram message
+        run: |
+          python -c '
+          import requests
+
+          url = "https://ai-trading-analyzer-api.onrender.com/api/scan"
+          bot_token = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
+          chat_id = "${{ secrets.TELEGRAM_CHAT_ID }}"
+
+          response = requests.get(url)
+          data = response.json()
+
+          if isinstance(data, list):
+              signals = data
+          elif isinstance(data, dict):
+              signals = data.get("signals", [data])
+          else:
+              signals = []
+
+          msg_parts = ["NSE Stock Signals Alert:\n"]
+          for s in signals:
+              stock = s.get("Stock", "N/A")
+              signal = s.get("Signal", "N/A")
+              price = s.get("Price", "N/A")
+              target = s.get("Target", "N/A")
+              stop_loss = s.get("Stop_Loss", "N/A")
+              prob_up = s.get("Probability_Up", "N/A")
+              news = s.get("News", "N/A")
+              msg_parts.append(f"Stock: {stock}\nSignal: {signal}\nPrice: {price}\nTarget: {target}\nStop_Loss: {stop_loss}\nProbability_Up: {prob_up}\nNews: {news}\n---")
+
+          message = "\n".join(msg_parts)
+
+          telegram_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+          payload = {
+              "chat_id": chat_id,
+              "text": message
+          }
+          res = requests.post(telegram_url, json=payload)
+          print(res.status_code, res.text)
+          '
