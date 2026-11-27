@@ -1,8 +1,9 @@
-name: Telegram Daily Alert
+name: Telegram Daily & Intraday Alert
 
 on:
   schedule:
-    - cron: "30 3 * * 1-5"
+    - cron: '0 4 * * 1-5'
+    - cron: '*/15 3-10 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -13,16 +14,57 @@ jobs:
         run: pip install requests
 
       - name: Fetch signals and send Telegram message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           python -c '
+          import os
+          import sys
+          import time
           import requests
 
-          url = "https://ai-trading-analyzer-api.onrender.com/api/scan"
-          bot_token = "${{ secrets.TELEGRAM_BOT_TOKEN }}"
-          chat_id = "${{ secrets.TELEGRAM_CHAT_ID }}"
+          bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+          event_schedule = os.environ.get("EVENT_SCHEDULE", "")
+          event_name = os.environ.get("EVENT_NAME", "")
 
-          response = requests.get(url)
-          data = response.json()
+          if not bot_token or not chat_id:
+              print("Missing Telegram secrets")
+              sys.exit(1)
+
+          health_url = "https://ai-trading-analyzer-api.onrender.com/health"
+          print("Pinging /health to wake Render service...")
+          for i in range(6):
+              try:
+                  res = requests.get(health_url, timeout=30)
+                  if res.status_code == 200:
+                      print("Render service is awake and healthy.")
+                      break
+              except Exception as e:
+                  print(f"Health ping attempt {i+1} failed: {e}")
+              time.sleep(10)
+
+          scan_url = "https://ai-trading-analyzer-api.onrender.com/api/scan"
+          print("Fetching /api/scan...")
+          data = None
+          for i in range(3):
+              try:
+                  res = requests.get(scan_url, timeout=60)
+                  if res.status_code == 200:
+                      data = res.json()
+                      break
+                  else:
+                      print(f"Scan request returned status code {res.status_code}")
+              except Exception as e:
+                  print(f"Scan attempt {i+1} failed: {e}")
+              time.sleep(5)
+
+          if data is None:
+              print("Failed to retrieve scan data.")
+              sys.exit(1)
 
           if isinstance(data, list):
               signals = data
@@ -31,8 +73,21 @@ jobs:
           else:
               signals = []
 
-          msg_parts = ["NSE Stock Signals Alert:\n"]
-          for s in signals:
+          is_intraday = (event_schedule == "*/15 3-10 * * 1-5")
+
+          if is_intraday:
+              active_signals = [s for s in signals if str(s.get("Signal", "")).upper() in ["BUY", "SELL"]]
+              if not active_signals:
+                  print("No BUY or SELL signals found (all WAIT). Skipping Telegram alert.")
+                  sys.exit(0)
+              
+              msg_parts = ["NSE Stock Intraday Signal Alert (BUY/SELL):\n"]
+              target_signals = active_signals
+          else:
+              msg_parts = ["NSE Stock Daily Market Summary:\n"]
+              target_signals = signals
+
+          for s in target_signals:
               stock = s.get("Stock", "N/A")
               signal = s.get("Signal", "N/A")
               price = s.get("Price", "N/A")
@@ -40,7 +95,7 @@ jobs:
               stop_loss = s.get("Stop_Loss", "N/A")
               prob_up = s.get("Probability_Up", "N/A")
               news = s.get("News", "N/A")
-              msg_parts.append(f"Stock: {stock}\nSignal: {signal}\nPrice: {price}\nTarget: {target}\nStop_Loss: {stop_loss}\nProbability_Up: {prob_up}\nNews: {news}\n---")
+              msg_parts.append(f"Stock: {stock}\nSignal: {signal}\nPrice: {price}\nTarget: {target}\nStop Loss: {stop_loss}\nProb Up: {prob_up}\nNews: {news}\n")
 
           message = "\n".join(msg_parts)
 
@@ -49,6 +104,10 @@ jobs:
               "chat_id": chat_id,
               "text": message
           }
-          res = requests.post(telegram_url, json=payload)
-          print(res.status_code, res.text)
+
+          resp = requests.post(telegram_url, json=payload, timeout=15)
+          if resp.status_code == 200:
+              print("Telegram notification sent successfully.")
+          else:
+              print(f"Failed to send Telegram message: {resp.status_code} {resp.text}")
           '
